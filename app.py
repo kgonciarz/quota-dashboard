@@ -115,8 +115,9 @@ if supabase: # Only attempt to fetch data if supabase client is initialized
 
             # Join dataframes on 'farmer_id'
             # Ensure farmer_id columns are of the same type for merging
-            df_quota['farmer_id'] = df_quota['farmer_id'].astype(str)
-            df_traceability_processed['farmer_id'] = df_traceability_processed['farmer_id'].astype(str)
+            df_quota['farmer_id'] = df_quota['farmer_id'].astype(str).str.strip().str.lower()
+            df_traceability_processed['farmer_id'] = df_traceability_processed['farmer_id'].astype(str).str.strip().str.lower()
+
 
             df_combined = pd.merge(df_traceability_processed, df_quota, on='farmer_id', how='left')
 
