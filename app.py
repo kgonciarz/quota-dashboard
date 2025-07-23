@@ -104,7 +104,7 @@ if supabase: # Only attempt to fetch data if supabase client is initialized
         if not df_quota.empty and not df_traceability.empty:
             # Process traceability data: group by farmer_id and get unique values for filtering columns
             # Ensure farmer_id is string for grouping
-            df_traceability['farmer_id'] = df_traceability['farmer_id'].astype(str)
+            df_traceability['farmer_id'] = df_traceability['farmer_id'].astype(str).str.strip().str.lower()
             df_traceability_processed = df_traceability.groupby('farmer_id').agg({
             'export_lot': lambda x: x.mode().iloc[0] if not x.mode().empty else x.iloc[0],
             'exporter': lambda x: x.mode().iloc[0] if not x.mode().empty else x.iloc[0],
