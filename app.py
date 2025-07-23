@@ -95,6 +95,56 @@ if data_traceability and data_farmers:
             return 'EXCEEDED'
 
     df_combined['quota_status'] = df_combined['quota_used_pct'].apply(classify_quota)
+    # Wypełnij brakujące dane tekstowe, jeśli jakieś są
+for col in ['quota_status', 'export_lot', 'exporter', 'cooperative_name', 'certification']:
+    if col in df_combined.columns:
+        df_combined[col].fillna('Unknown', inplace=True)
+
+# Dodaj opisową wersję statusu
+def map_quota_status_to_descriptive(status):
+    if status == 'OK':
+        return 'Underutilized'
+    elif status == 'WARNING':
+        return 'Meeting Quota'
+    elif status == 'EXCEEDED':
+        return 'Exceeding Quota'
+    else:
+        return 'Unknown'
+
+df_combined['descriptive_quota_status'] = df_combined['quota_status'].apply(map_quota_status_to_descriptive)
+
+# Ustawienia filtrów w sidebarze
+st.sidebar.header("Filter Data")
+exporters = ['All'] + sorted(df_combined['exporter'].unique())
+cooperatives = ['All'] + sorted(df_combined['cooperative_name'].unique())
+certifications = ['All'] + sorted(df_combined['certification'].unique())
+statuses = ['All'] + sorted(df_combined['quota_status'].unique())
+
+selected_exporters = st.sidebar.multiselect("Exporter", exporters, default=exporters)
+selected_cooperatives = st.sidebar.multiselect("Cooperative", cooperatives, default=cooperatives)
+selected_certifications = st.sidebar.multiselect("Certification", certifications, default=certifications)
+selected_statuses = st.sidebar.multiselect("Quota Status", statuses, default=statuses)
+farmer_search = st.sidebar.text_input("Search Farmer ID").lower()
+
+min_pct, max_pct = st.sidebar.slider("Quota Used (%) Range",
+                                     float(df_combined['quota_used_pct'].min()),
+                                     float(df_combined['quota_used_pct'].max()),
+                                     (float(df_combined['quota_used_pct'].min()), float(df_combined['quota_used_pct'].max()))
+                                     )
+
+# Zastosuj filtry
+filtered_df = df_combined[
+    (df_combined['exporter'].isin(selected_exporters if 'All' not in selected_exporters else exporters[1:])) &
+    (df_combined['cooperative_name'].isin(selected_cooperatives if 'All' not in selected_cooperatives else cooperatives[1:])) &
+    (df_combined['certification'].isin(selected_certifications if 'All' not in selected_certifications else certifications[1:])) &
+    (df_combined['quota_status'].isin(selected_statuses if 'All' not in selected_statuses else statuses[1:])) &
+    (df_combined['quota_used_pct'] >= min_pct) &
+    (df_combined['quota_used_pct'] <= max_pct)
+].copy()
+
+if farmer_search:
+    filtered_df = filtered_df[filtered_df['farmer_id'].str.contains(farmer_search)]
+
 
 else:
     st.warning("No data fetched from Supabase or one of the datasets is empty.")
