@@ -284,7 +284,7 @@ if supabase: # Only attempt to fetch data if supabase client is initialized
                     filtered_df = pd.DataFrame() # filtered_df is empty if df_combined was empty
 
 
-            else:
+                else:
                 st.warning(f"No data found in the '{quota_view_name}' or '{traceability_table_name}' or the join resulted in an empty dataset. Please check the database connection, table names, and data.")
                 filtered_df = pd.DataFrame() # Ensure filtered_df is empty if no data was fetched/joined
 
