@@ -47,7 +47,7 @@ except Exception as e:
 
 
 # Re-fetch and process data
-table_name = 'farmer_quotas'
+table_name = 'quota_view'
 
 st.title("Farmer Quota Dashboard") # Main dashboard title
 st.markdown("Explore and analyze farmer quota utilization data.") # Add a brief description
