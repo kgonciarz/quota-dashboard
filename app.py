@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 from supabase import create_client, Client
@@ -9,7 +10,6 @@ try:
     # Access secrets using .get() to avoid raising KeyError directly
     SUPABASE_URL = st.secrets.get("supabase", {}).get("url")
     SUPABASE_KEY = st.secrets.get("supabase", {}).get("key")
-
 
     # Check if secrets were successfully retrieved
     if not SUPABASE_URL or not SUPABASE_KEY:
@@ -35,7 +35,7 @@ except Exception as e:
     st.stop() # Stop execution if connection fails
 
 
-# Re-fetch and process data (including joining and data preparation)
+# Fetch data (including joining and data preparation)
 farmers_table_name = 'farmers'
 traceability_table_name = 'traceability'
 
