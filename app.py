@@ -157,7 +157,22 @@ if supabase: # Only attempt to fetch data if supabase client is initialized
 
             # --- Add this section to display df_combined before filtering ---
             st.subheader("Combined Data Before Filtering")
-            st.dataframe(df_combined)
+
+            def color_quota_status(val):
+                if val == "EXCEEDED":
+                    return "color: red"
+                elif val == "WARNING":
+                    return "color: orange"
+                elif val == "OK":
+                    return "color: green"
+                return ""
+
+            styled_combined = df_combined.style \
+                .format({'quota_used_pct': '{:.2f}%', 'max_quota_kg': '{:,.1f}', 'total_net_weight_kg': '{:,.1f}'}) \
+                .applymap(color_quota_status, subset=['quota_status'])
+
+            st.dataframe(styled_combined)
+
             # -------------------------------------------------------------
 
 
