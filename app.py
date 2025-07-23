@@ -108,28 +108,21 @@ if supabase: # Only attempt to fetch data if supabase client is initialized
                 'certification': 'first'
             }).reset_index()
 
-        elif not df_quota.empty and df_traceability.empty:
-             df_traceability_processed = pd.DataFrame(columns=['farmer_id', 'export_lot', 'exporter', 'cooperative_name', 'certification'])
-             st.warning("Traceability DataFrame is empty after fetching, cannot process filtering columns.")
-        else:
-            df_traceability_processed = pd.DataFrame(columns=['farmer_id', 'export_lot', 'exporter', 'cooperative_name', 'certification'])
-            st.warning("Quota or Traceability DataFrame is empty after fetching.")
-
-
-        # Join dataframes on 'farmer_id'
-        if not df_quota.empty: # Join even if traceability_processed is empty to keep quota data
+            # Join dataframes on 'farmer_id'
             # Ensure farmer_id columns are of the same type for merging
             df_quota['farmer_id'] = df_quota['farmer_id'].astype(str)
             df_traceability_processed['farmer_id'] = df_traceability_processed['farmer_id'].astype(str)
 
             df_combined = pd.merge(df_quota, df_traceability_processed, on='farmer_id', how='left')
 
-        elif not df_quota.empty and df_traceability_processed.empty:
+        elif not df_quota.empty and df_traceability.empty:
             df_combined = df_quota.copy() # If traceability is empty, just use quota data and add empty columns
             for col in ['export_lot', 'exporter', 'cooperative_name', 'certification']:
                  df_combined[col] = None # Add columns with None values
+            st.warning("Traceability DataFrame is empty after fetching, cannot process filtering columns.")
         else:
             df_combined = pd.DataFrame() # Ensure df_combined is empty if quota data is empty
+            st.warning(f"No data found in the '{quota_view_name}' or '{traceability_table_name}' after fetching. Check table names and data.")
 
 
         # Continue processing only if df_combined is not empty
@@ -282,12 +275,6 @@ if supabase: # Only attempt to fetch data if supabase client is initialized
                          filtered_df = filtered_df[filtered_df['farmer_id'].astype(str).str.lower().str.contains(farmer_id_search)].copy()
                 else:
                     filtered_df = pd.DataFrame() # filtered_df is empty if df_combined was empty
-
-
-                else:
-                st.warning(f"No data found in the '{quota_view_name}' or '{traceability_table_name}' or the join resulted in an empty dataset. Please check the database connection, table names, and data.")
-                filtered_df = pd.DataFrame() # Ensure filtered_df is empty if no data was fetched/joined
-
 
     except Exception as e:
         st.error(f"An error occurred during data fetching or processing: {e}")
