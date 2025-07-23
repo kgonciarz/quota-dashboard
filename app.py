@@ -397,6 +397,23 @@ with st.container():
             title='Distribution of Total Net Weight (kg)' # Add chart title
         ).interactive()
         st.altair_chart(chart_total_weight, use_container_width=True)
+
+                # Pie chart for Quota Status distribution
+        quota_status_counts = filtered_df['quota_status'].value_counts().reset_index()
+        quota_status_counts.columns = ['quota_status', 'count']
+
+        pie_chart = alt.Chart(quota_status_counts).mark_arc(innerRadius=50).encode(
+            theta=alt.Theta(field="count", type="quantitative"),
+            color=alt.Color(field="quota_status", type="nominal",
+                            scale=alt.Scale(domain=["OK", "WARNING", "EXCEEDED"],
+                                            range=["green", "orange", "red"])),
+            tooltip=["quota_status", "count"]
+        ).properties(
+            title="Quota Status Distribution"
+        )
+
+        st.altair_chart(pie_chart, use_container_width=True)
+
      else:
           st.info("No data to display in visualizations based on current filters.")
 
