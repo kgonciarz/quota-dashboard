@@ -7,8 +7,9 @@ import sys
 # Re-initialize Supabase client (using placeholder values as before, but prefer secrets)
 try:
     # Access secrets using .get() to avoid raising KeyError directly
-    SUPABASE_URL = st.secrets.get("SUPABASE_URL")
-    SUPABASE_KEY = st.secrets.get("SUPABASE_KEY")
+    SUPABASE_URL = st.secrets.get("supabase", {}).get("url")
+    SUPABASE_KEY = st.secrets.get("supabase", {}).get("key")
+
 
     # Check if secrets were successfully retrieved
     if not SUPABASE_URL or not SUPABASE_KEY:
