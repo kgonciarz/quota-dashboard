@@ -106,11 +106,12 @@ if supabase: # Only attempt to fetch data if supabase client is initialized
             # Ensure farmer_id is string for grouping
             df_traceability['farmer_id'] = df_traceability['farmer_id'].astype(str)
             df_traceability_processed = df_traceability.groupby('farmer_id').agg({
-                'export_lot': 'first',
-                'exporter': 'first',
-                'cooperative_name': 'first',
-                'certification': 'first'
-            }).reset_index()
+            'export_lot': lambda x: x.mode().iloc[0] if not x.mode().empty else x.iloc[0],
+            'exporter': lambda x: x.mode().iloc[0] if not x.mode().empty else x.iloc[0],
+            'cooperative_name': lambda x: x.mode().iloc[0] if not x.mode().empty else x.iloc[0],
+            'certification': lambda x: x.mode().iloc[0] if not x.mode().empty else x.iloc[0]
+        }).reset_index()
+
 
             # Join dataframes on 'farmer_id'
             # Ensure farmer_id columns are of the same type for merging
