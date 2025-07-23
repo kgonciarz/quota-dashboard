@@ -4,34 +4,22 @@ from supabase import create_client, Client
 import altair as alt
 import sys
 
-# Check if altair is installed, and install it if not (for deployment preparation)
-try:
-    import altair as alt
-except ImportError:
-    st.error("Altair library not found. Attempting to install...")
-    try:
-        import subprocess
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "altair"])
-        st.success("Altair installed successfully. Please rerun the app.")
-        st.stop() # Stop execution after installation
-    except Exception as e:
-        st.error(f"Failed to install Altair: {e}")
-        st.stop()
-
-# Review and refine the existing Streamlit script
-
-# Use Streamlit Secrets for Supabase credentials in a production environment
-# Ensure you have created a .streamlit/secrets.toml file with your credentials
-# For local testing, you might keep the placeholders or use environment variables
+# Re-initialize Supabase client (using placeholder values as before, but prefer secrets)
 try:
     # Access secrets using .get() to avoid raising KeyError directly
-    SUPABASE_URL = st.secrets["supabase"]["url"]
-    SUPABASE_KEY = st.secrets["supabase"]["key"]
+    SUPABASE_URL = st.secrets.get("SUPABASE_URL")
+    SUPABASE_KEY = st.secrets.get("SUPABASE_KEY")
 
+    # Check if secrets were successfully retrieved
+    if not SUPABASE_URL or not SUPABASE_KEY:
+         raise KeyError("Supabase secrets not found in Streamlit Secrets.")
 
-
+except KeyError:
+    st.warning("Supabase credentials not found in Streamlit Secrets. Using placeholder values.")
+    SUPABASE_URL = "https://your-project-id.supabase.co"
+    SUPABASE_KEY = "YOUR_SUPABASE_KEY"
 except Exception as e:
-    st.error(f"An error occurred while accessing secrets: {e}")
+    st.error(f"An unexpected error occurred while accessing secrets: {e}")
     st.warning("Using placeholder values for Supabase credentials.")
     SUPABASE_URL = "https://your-project-id.supabase.co"
     SUPABASE_KEY = "YOUR_SUPABASE_KEY"
@@ -46,174 +34,260 @@ except Exception as e:
     st.stop() # Stop execution if connection fails
 
 
-# Re-fetch and process data
-table_name = 'quota_view'
+# Re-fetch and process data (including joining and data preparation)
+farmers_table_name = 'farmers'
+traceability_table_name = 'traceability'
 
-st.title("Farmer Quota Dashboard") # Main dashboard title
-st.markdown("Explore and analyze farmer quota utilization data.") # Add a brief description
+st.title("Farmer Cocoa Quota Dashboard") # Main dashboard title
+st.markdown("Explore and analyze farmer cocoa quota utilization data.") # Add a brief description
 
 try:
     # Add a spinner to indicate data loading
-    with st.spinner(f"Fetching data from {table_name}..."):
-        response = supabase.from_(table_name).select('farmer_id, max_quota_kg, quota_used_pct, quota_status, total_net_weight_kg').execute()
-        data = response.data
+    with st.spinner(f"Fetching data from {farmers_table_name} and {traceability_table_name}..."):
+        response_farmers = supabase.from_(farmers_table_name).select('farmer_id, max_quota_kg, quota_status, cooperative_name, certification').execute()
+        data_farmers = response_farmers.data
 
-    if data:
-        df_quota = pd.DataFrame(data)
-
-        # Add data cleaning/processing comments for clarity
-        # Ensure 'quota_used_pct', 'max_quota_kg', and 'total_net_weight_kg' are numeric
-        df_quota['quota_used_pct'] = pd.to_numeric(df_quota['quota_used_pct'], errors='coerce')
-        df_quota['max_quota_kg'] = pd.to_numeric(df_quota['max_quota_kg'], errors='coerce')
-        df_quota['total_net_weight_kg'] = pd.to_numeric(df_quota['total_net_weight_kg'], errors='coerce')
-
-        # Handle missing values - filling with 0 for numeric and 'Unknown' for 'quota_status'
-        df_quota['quota_used_pct'].fillna(0, inplace=True)
-        df_quota['max_quota_kg'].fillna(0, inplace=True)
-        df_quota['total_net_weight_kg'].fillna(0, inplace=True)
-        df_quota['quota_status'].fillna('Unknown', inplace=True)
-
-        # Create a new categorical quota status column with comments
-        def categorize_quota_status(pct):
-            """Categorizes the quota usage percentage into descriptive statuses."""
-            if pct < 0.5:
-                return 'Underutilized'
-            elif pct >= 0.5 and pct < 1.0:
-                return 'Meeting Quota'
-            elif pct >= 1.0:
-                return 'Exceeding Quota'
-            else:
-                return 'Unknown' # Handle potential non-numeric values after coercion and fillna
-
-        df_quota['descriptive_quota_status'] = df_quota['quota_used_pct'].apply(categorize_quota_status)
-
-        # Section for Filters - Add descriptive text and organize using sidebar
-        st.sidebar.header("Filter Data")
-        st.sidebar.markdown("Adjust the filters below to refine the data displayed in the dashboard.")
-
-        with st.sidebar.container():
-            # Filter for quota_status
-            quota_status_options = df_quota['quota_status'].unique().tolist()
-            selected_quota_statuses = st.sidebar.multiselect(
-                "Filter by Quota Status", # Add filter label
-                quota_status_options,
-                default=quota_status_options
-            )
-
-            # Filter for descriptive_quota_status
-            descriptive_status_options = df_quota['descriptive_quota_status'].unique().tolist()
-            selected_descriptive_statuses = st.sidebar.multiselect(
-                "Filter by Descriptive Quota Status", # Add filter label
-                descriptive_status_options,
-                default=descriptive_status_options
-            )
-
-            # Filter for quota_used_pct range - Add label and format slider values
-            min_quota_pct, max_quota_pct = st.sidebar.slider(
-                "Filter by Quota Used (%)", # Add filter label
-                float(df_quota['quota_used_pct'].min()),
-                float(df_quota['quota_used_pct'].max()),
-                (float(df_quota['quota_used_pct'].min()), float(df_quota['quota_used_pct'].max())),
-                format="%.2f" # Format slider values
-            )
-
-        # Apply filters
-        filtered_df = df_quota[
-            (df_quota['quota_status'].isin(selected_quota_statuses)) &
-            (df_quota['descriptive_quota_status'].isin(selected_descriptive_statuses)) &
-            (df_quota['quota_used_pct'] >= min_quota_pct) &
-            (df_quota['quota_used_pct'] <= max_quota_pct)
-        ].copy() # Use .copy() to avoid SettingWithCopyWarning
-
-        # Display a warning if no data matches the filters
-        if filtered_df.empty:
-            st.warning("No data matches the selected filters.")
-            st.stop() # Stop execution if no data is available
-
-        # Section for Key Metrics
-        st.header("Key Metrics") # Add section title
-        st.markdown("Summary statistics for the filtered data.") # Add descriptive text
-        with st.container():
-            # Calculate key metrics from the filtered data
-            total_farmers = filtered_df['farmer_id'].nunique() if not filtered_df.empty else 0
-            average_quota_used_pct = filtered_df['quota_used_pct'].mean() if not filtered_df.empty else 0
-            total_max_quota_kg = filtered_df['max_quota_kg'].sum() if not filtered_df.empty else 0
-            total_net_weight_kg = filtered_df['total_net_weight_kg'].sum() if not filtered_df.empty else 0
-
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.subheader("Total Farmers") # Add metric title
-                st.metric(label="Total Farmers", value=total_farmers) # Use st.metric for better formatting and appearance
-            with col2:
-                st.subheader("Average Quota Used (%)") # Add metric title
-                st.metric(label="Average Quota Used (%)", value=f"{average_quota_used_pct:.2%}") # Format as percentage
-            with col3:
-                st.subheader("Total Max Quota (kg)") # Add metric title
-                st.metric(label="Total Max Quota (kg)", value=f"{total_max_quota_kg:,.0f} kg") # Format with thousands separator and unit
-            with col4:
-                st.subheader("Total Net Weight (kg)") # Add metric title
-                st.metric(label="Total Net Weight (kg)", value=f"{total_net_weight_kg:,.0f} kg") # Format with thousands separator and unit
+        response_traceability = supabase.from_(traceability_table_name).select('farmer_id, export_lot, exporter, total_net_weight_kg').execute()
+        data_traceability = response_traceability.data
 
 
-        # Section for Raw Data Table
-        st.header("Raw Data Table") # Add section title
-        st.markdown("Detailed farmer quota information.") # Add descriptive text
-        with st.container():
-            # Implement sorting for quota_used_pct - Move to main area for better visibility with the table
-            sort_order = st.selectbox(
-                "Sort the table by Quota Used (%)", # Add label for sorting control
-                ["Ascending", "Descending"]
-            )
+    if data_farmers and data_traceability:
+        df_farmers = pd.DataFrame(data_farmers)
+        df_traceability = pd.DataFrame(data_traceability)
 
-            if sort_order == "Ascending":
-                sorted_df = filtered_df.sort_values(by='quota_used_pct', ascending=True)
-            else:
-                sorted_df = filtered_df.sort_values(by='quota_used_pct', ascending=False)
-
-            # Display the raw data table (only relevant columns) - Use st.dataframe with formatting
-            st.dataframe(
-                sorted_df[['farmer_id', 'max_quota_kg', 'quota_used_pct', 'quota_status', 'total_net_weight_kg']].style
-                .format({'quota_used_pct': '{:.2%}', 'max_quota_kg': '{:,.0f}', 'total_net_weight_kg': '{:,.0f}'}) # Apply formatting
-            )
+        # 1. Group the df_traceability DataFrame by farmer_id and calculate the sum of total_net_weight_kg
+        if not df_traceability.empty:
+            df_traceability_agg = df_traceability.groupby('farmer_id')['total_net_weight_kg'].sum().reset_index()
+            df_traceability_agg.rename(columns={'total_net_weight_kg': 'aggregated_total_net_weight_kg'}, inplace=True)
+        else:
+            df_traceability_agg = pd.DataFrame(columns=['farmer_id', 'aggregated_total_net_weight_kg'])
+            st.warning("Traceability DataFrame is empty, aggregation skipped.")
 
 
-        # Section for Graphs
-        st.header("Visualizations") # Add section title
-        st.markdown("Visual representations of the filtered data distributions.") # Add descriptive text
-        with st.container():
-            # Histogram for max_quota_kg with improved labels and tooltips
-            chart_max_quota = alt.Chart(filtered_df).mark_bar().encode(
-                x=alt.X('max_quota_kg', bin=True, title='Maximum Quota (kg)'), # Add axis title
-                y=alt.Y('count()', title='Number of Farmers'), # Add axis title
-                tooltip=[alt.Tooltip('max_quota_kg', bin=True, title='Max Quota (kg)'), 'count()'] # Add tooltips
-            ).properties(
-                title='Distribution of Maximum Quota (kg)' # Add chart title
-            ).interactive()
-            st.altair_chart(chart_max_quota, use_container_width=True)
-
-            # Histogram for quota_used_pct with improved labels, tooltips, and formatting
-            chart_quota_pct = alt.Chart(filtered_df).mark_bar().encode(
-                x=alt.X('quota_used_pct', bin=alt.Bin(step=0.05), title='Quota Used (%)', axis=alt.Axis(format='%')), # Add axis title and format axis as percentage
-                y=alt.Y('count()', title='Number of Farmers'), # Add axis title
-                tooltip=[alt.Tooltip('quota_used_pct', bin=alt.Bin(step=0.05), title='Quota Used (%)', format='.2%'), 'count()'] # Add tooltips and format tooltip as percentage
-            ).properties(
-                title='Distribution of Quota Used (%)' # Add chart title
-            ).interactive()
-            st.altair_chart(chart_quota_pct, use_container_width=True)
-
-            # Histogram for total_net_weight_kg with improved labels and tooltips
-            chart_total_weight = alt.Chart(filtered_df).mark_bar().encode(
-                x=alt.X('total_net_weight_kg', bin=True, title='Total Net Weight (kg)'), # Add axis title
-                y=alt.Y('count()', title='Number of Farmers'), # Add axis title
-                tooltip=[alt.Tooltip('total_net_weight_kg', bin=True, title='Total Net Weight (kg)'), 'count()'] # Add tooltips
-            ).properties(
-                title='Distribution of Total Net Weight (kg)' # Add chart title
-            ).interactive()
-            st.altair_chart(chart_total_weight, use_container_width=True)
+        # 2. Ensure the max_quota_kg column in df_farmers is numeric, coercing errors.
+        if not df_farmers.empty:
+            df_farmers['max_quota_kg'] = pd.to_numeric(df_farmers['max_quota_kg'], errors='coerce')
+        else:
+            st.warning("Farmers DataFrame is empty, cannot process 'max_quota_kg'.")
 
 
-    else:
-        st.warning(f"No data found in the '{table_name}' table. Please check the database connection and table name.")
+        # 3. Join df_farmers and df_traceability_agg DataFrames on the farmer_id column.
+        if not df_farmers.empty:
+            df_combined = pd.merge(df_farmers, df_traceability_agg, on='farmer_id', how='left')
+        else:
+            df_combined = pd.DataFrame()
+            st.warning("Farmers DataFrame is empty, combined DataFrame is empty.")
+
+        # Continue processing only if df_combined is not empty
+        if not df_combined.empty:
+            # 4. Fill any missing aggregated_total_net_weight_kg values with 0
+            df_combined['aggregated_total_net_weight_kg'].fillna(0, inplace=True)
+
+            # 5. Calculate the quota_used_pct, handling potential division by zero
+            # Replace 0 max_quota_kg with NaN before division to avoid ZeroDivisionError, then fill inf with 0
+            df_combined['max_quota_kg_clean'] = df_combined['max_quota_kg'].replace(0, pd.NA)
+            df_combined['quota_used_pct'] = (df_combined['aggregated_total_net_weight_kg'] / df_combined['max_quota_kg_clean']).fillna(0)
+            df_combined.drop('max_quota_kg_clean', axis=1, inplace=True) # Drop the temporary column
+
+            # 6. Ensure specified columns have missing values filled with 'Unknown'
+            for col in ['quota_status', 'cooperative_name', 'certification']:
+                if col in df_combined.columns:
+                    df_combined[col].fillna('Unknown', inplace=True)
+                else:
+                    st.warning(f"Column '{col}' not found in combined DataFrame.")
+                    # Add the column with 'Unknown' if it doesn't exist, to avoid future errors
+                    df_combined[col] = 'Unknown'
+
+            # Also fillna for exporter and export_lot from traceability if they exist after join
+            for col in ['exporter', 'export_lot']:
+                 if col in df_combined.columns:
+                     df_combined[col].fillna('Unknown', inplace=True)
+                 else:
+                      # Add the column with 'Unknown' if it doesn't exist, to avoid future errors
+                      df_combined[col] = 'Unknown'
+
+
+            # 7. Create a new categorical column descriptive_quota_status
+            def categorize_quota_status(pct):
+                """Categorizes the quota usage percentage into descriptive statuses."""
+                if pd.isna(pct):
+                    return 'Unknown' # Handle potential NaNs after fillna
+                elif pct < 0.5:
+                    return 'Underutilized'
+                elif pct >= 0.5 and pct < 1.0:
+                    return 'Meeting Quota'
+                elif pct >= 1.0:
+                    return 'Exceeding Quota'
+                else:
+                    return 'Unknown'
+
+            df_combined['descriptive_quota_status'] = df_combined['quota_used_pct'].apply(categorize_quota_status)
+
+
+            # Section for Filters
+            st.sidebar.header("Filter Data") # Add section title
+            st.sidebar.markdown("Adjust the filters below to refine the data displayed in the dashboard.") # Add descriptive text
+
+            with st.sidebar.container():
+                # Filter for exporter
+                exporter_options = df_combined['exporter'].unique().tolist()
+                selected_exporters = st.sidebar.multiselect(
+                    "Filter by Exporter",
+                    exporter_options,
+                    default=exporter_options
+                )
+
+                # Filter for quota_status
+                quota_status_options = df_combined['quota_status'].unique().tolist()
+                selected_quota_statuses = st.sidebar.multiselect(
+                    "Filter by Quota Status",
+                    quota_status_options,
+                    default=quota_status_options
+                )
+
+                # Filter for cooperative_name
+                cooperative_options = df_combined['cooperative_name'].unique().tolist()
+                selected_cooperatives = st.sidebar.multiselect(
+                    "Filter by Cooperative Name",
+                    cooperative_options,
+                    default=cooperative_options
+                )
+
+                # Filter for certification
+                certification_options = df_combined['certification'].unique().tolist()
+                selected_certifications = st.sidebar.multiselect(
+                    "Filter by Certification",
+                    certification_options,
+                    default=certification_options
+                )
+
+                # Filter for farmer_id (text input)
+                farmer_id_search = st.sidebar.text_input("Search by Farmer ID (substring search)").lower()
+
+
+                # Filter for quota_used_pct range
+                min_quota_pct, max_quota_pct = st.sidebar.slider(
+                    "Filter by Quota Used (%)",
+                    float(df_combined['quota_used_pct'].min()),
+                    float(df_combined['quota_used_pct'].max()),
+                    (float(df_combined['quota_used_pct'].min()), float(df_combined['quota_used_pct'].max())),
+                    format="%.2f"
+                )
+
+
+            # Apply filters
+            filtered_df = df_combined[
+                (df_combined['exporter'].isin(selected_exporters)) &
+                (df_combined['quota_status'].isin(selected_quota_statuses)) &
+                (df_combined['cooperative_name'].isin(selected_cooperatives)) &
+                (df_combined['certification'].isin(selected_certifications)) &
+                (df_combined['quota_used_pct'] >= min_quota_pct) &
+                (df_combined['quota_used_pct'] <= max_quota_pct)
+            ].copy() # Use .copy() to avoid SettingWithCopyWarning
+
+            # Apply farmer_id text filter
+            if farmer_id_search:
+                 filtered_df = filtered_df[filtered_df['farmer_id'].astype(str).str.lower().str.contains(farmer_id_search)].copy()
+
+
+            # Display a warning if no data matches the filters
+            if filtered_df.empty:
+                st.warning("No data matches the selected filters.")
+                # Continue execution to show empty sections or add st.stop() if desired
+                # st.stop() # Uncomment to stop if no data
+
+
+            # Section for Key Metrics
+            st.header("Key Metrics") # Add section title
+            st.markdown("Summary statistics for the filtered data.") # Add descriptive text
+            with st.container():
+                # Calculate key metrics from the filtered data
+                total_farmers = filtered_df['farmer_id'].nunique() if not filtered_df.empty else 0
+                average_quota_used_pct = filtered_df['quota_used_pct'].mean() if not filtered_df.empty else 0
+                total_max_quota_kg = filtered_df['max_quota_kg'].sum() if not filtered_df.empty else 0
+                total_net_weight_kg = filtered_df['aggregated_total_net_weight_kg'].sum() if not filtered_df.empty else 0 # Use aggregated weight
+
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.subheader("Total Farmers") # Add metric title
+                    st.metric(label="Total Farmers", value=total_farmers) # Use st.metric for better formatting and appearance
+                with col2:
+                    st.subheader("Average Quota Used (%)") # Add metric title
+                    st.metric(label="Average Quota Used (%)", value=f"{average_quota_used_pct:.2%}") # Format as percentage
+                with col3:
+                    st.subheader("Total Max Quota (kg)") # Add metric title
+                    st.metric(label="Total Max Quota (kg)", value=f"{total_max_quota_kg:,.0f} kg") # Format with thousands separator and unit
+                with col4:
+                    st.subheader("Total Net Weight (kg)") # Add metric title
+                    st.metric(label="Total Net Weight (kg)", value=f"{total_net_weight_kg:,.0f} kg") # Format with thousands separator and unit
+
+
+            # Section for Raw Data Table
+            st.header("Combined Data Table") # Add section title
+            st.markdown("Detailed farmer quota information.") # Add descriptive text
+            with st.container():
+                if not filtered_df.empty:
+                    # Implement sorting for quota_used_pct - Move to main area for better visibility with the table
+                    sort_order = st.selectbox(
+                        "Sort the table by Quota Used (%)", # Add label for sorting control
+                        ["Ascending", "Descending"]
+                    )
+
+                    if sort_order == "Ascending":
+                        sorted_df = filtered_df.sort_values(by='quota_used_pct', ascending=True)
+                    else:
+                        sorted_df = filtered_df.sort_values(by='quota_used_pct', ascending=False)
+
+                    # Display the raw data table (only relevant columns) - Use st.dataframe with formatting
+                    st.dataframe(
+                        sorted_df[['farmer_id', 'max_quota_kg', 'aggregated_total_net_weight_kg', 'quota_used_pct', 'quota_status', 'descriptive_quota_status', 'cooperative_name', 'certification', 'exporter', 'export_lot']].style
+                        .format({'quota_used_pct': '{:.2%}', 'max_quota_kg': '{:,.0f}', 'aggregated_total_net_weight_kg': '{:,.0f}'}) # Apply formatting
+                    )
+                else:
+                     st.info("No data to display in the table based on current filters.")
+
+
+            # Section for Graphs
+            st.header("Visualizations") # Add section title
+            st.markdown("Visual representations of the filtered data distributions.") # Add descriptive text
+            with st.container():
+                 if not filtered_df.empty:
+                    # Histogram for max_quota_kg with improved labels and tooltips
+                    chart_max_quota = alt.Chart(filtered_df).mark_bar().encode(
+                        x=alt.X('max_quota_kg', bin=True, title='Maximum Quota (kg)'), # Add axis title
+                        y=alt.Y('count()', title='Number of Farmers'), # Add axis title
+                        tooltip=[alt.Tooltip('max_quota_kg', bin=True, title='Max Quota (kg)'), 'count()'] # Add tooltips
+                    ).properties(
+                        title='Distribution of Maximum Quota (kg)' # Add chart title
+                    ).interactive()
+                    st.altair_chart(chart_max_quota, use_container_width=True)
+
+                    # Histogram for quota_used_pct with improved labels, tooltips, and formatting
+                    chart_quota_pct = alt.Chart(filtered_df).mark_bar().encode(
+                        x=alt.X('quota_used_pct', bin=alt.Bin(step=0.05), title='Quota Used (%)', axis=alt.Axis(format='%')), # Add axis title and format axis as percentage
+                        y=alt.Y('count()', title='Number of Farmers'), # Add axis title
+                        tooltip=[alt.Tooltip('quota_used_pct', bin=alt.Bin(step=0.05), title='Quota Used (%)', format='.2%'), 'count()'] # Add tooltips and format tooltip as percentage
+                    ).properties(
+                        title='Distribution of Quota Used (%)' # Add chart title
+                    ).interactive()
+                    st.altair_chart(chart_quota_pct, use_container_width=True)
+
+                    # Histogram for total_net_weight_kg with improved labels and tooltips
+                    chart_total_weight = alt.Chart(filtered_df).mark_bar().encode(
+                        x=alt.X('aggregated_total_net_weight_kg', bin=True, title='Total Net Weight (kg)'), # Add axis title, use aggregated weight
+                        y=alt.Y('count()', title='Number of Farmers'), # Add axis title
+                        tooltip=[alt.Tooltip('aggregated_total_net_weight_kg', bin=True, title='Total Net Weight (kg)'), 'count()'] # Add tooltips, use aggregated weight
+                    ).properties(
+                        title='Distribution of Total Net Weight (kg)' # Add chart title
+                    ).interactive()
+                    st.altair_chart(chart_total_weight, use_container_width=True)
+                 else:
+                      st.info("No data to display in visualizations based on current filters.")
+
+
+        else:
+            st.warning(f"No data found in the '{farmers_table_name}' or '{traceability_table_name}' tables or the join resulted in an empty dataset. Please check the database connection, table names, and data.")
 
 except Exception as e:
     st.error(f"An error occurred: {e}")
