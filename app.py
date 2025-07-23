@@ -25,8 +25,9 @@ except ImportError:
 # For local testing, you might keep the placeholders or use environment variables
 try:
     # Access secrets using .get() to avoid raising KeyError directly
-    SUPABASE_URL = st.secrets["SUPABASE_URL"]
-    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    SUPABASE_URL = st.secrets["supabase"]["url"]
+    SUPABASE_KEY = st.secrets["supabase"]["key"]
+
 
 
 except Exception as e:
