@@ -319,7 +319,7 @@ with st.container():
         # Implement sorting for quota_used_pct - Move to main area for better visibility with the table
         sort_order = st.selectbox(
             "Sort the table by Quota Used (%)", # Add label for sorting control
-            ["Ascending", "Descending"]
+            ["Ascending", "Descending"],
             index=1
         )
 
