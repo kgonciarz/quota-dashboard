@@ -126,11 +126,22 @@ selected_certifications = st.sidebar.multiselect("Certification", certifications
 selected_statuses = st.sidebar.multiselect("Quota Status", statuses, default=statuses)
 farmer_search = st.sidebar.text_input("Search Farmer ID").lower()
 
-min_pct, max_pct = st.sidebar.slider("Quota Used (%) Range",
-                                     float(df_combined['quota_used_pct'].min()),
-                                     float(df_combined['quota_used_pct'].max()),
-                                     (float(df_combined['quota_used_pct'].min()), float(df_combined['quota_used_pct'].max()))
-                                     )
+min_val = df_combined['quota_used_pct'].min()
+max_val = df_combined['quota_used_pct'].max()
+
+# Ustaw wartości domyślne jeśli brak danych
+if pd.isna(min_val):
+    min_val = 0.0
+if pd.isna(max_val):
+    max_val = 100.0
+
+min_pct, max_pct = st.sidebar.slider(
+    "Quota Used (%) Range",
+    float(min_val),
+    float(max_val),
+    (float(min_val), float(max_val)),
+    format="%.2f"
+)
 
 # Zastosuj filtry
 filtered_df = df_combined[
