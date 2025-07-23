@@ -155,20 +155,6 @@ if supabase: # Only attempt to fetch data if supabase client is initialized
                     df_combined[col] = 'Unknown' # Add column with 'Unknown' if it got missed
 
 
-            # Create a new categorical column descriptive_quota_status based on the view's quota_status
-            def map_quota_status_to_descriptive(status):
-                """Maps the view's quota status to a descriptive string."""
-                if status == 'OK':
-                    return 'Underutilized'
-                elif status == 'WARNING':
-                    return 'Meeting Quota'
-                elif status == 'EXCEEDED':
-                    return 'Exceeding Quota'
-                else:
-                    return 'Unknown' # Handle potential other statuses or None
-
-            df_combined['descriptive_quota_status'] = df_combined['quota_status'].apply(map_quota_status_to_descriptive)
-
             # --- Add this section to display df_combined before filtering ---
             st.subheader("Combined Data Before Filtering")
             st.dataframe(df_combined)
@@ -343,7 +329,7 @@ with st.container():
 
         # Display the raw data table (only relevant columns) - Use st.dataframe with formatting
         st.dataframe(
-            sorted_df[['farmer_id', 'max_quota_kg', 'total_net_weight_kg', 'quota_used_pct', 'quota_status', 'descriptive_quota_status', 'cooperative_name', 'certification', 'exporter', 'export_lot']].style
+            sorted_df[['farmer_id', 'max_quota_kg', 'total_net_weight_kg', 'quota_used_pct', 'quota_status', 'cooperative_name', 'certification', 'exporter', 'export_lot']].style
             .format({'quota_used_pct': '{:.2f}%', 'max_quota_kg': '{:,.0f}', 'total_net_weight_kg': '{:,.0f}'}) # Apply formatting, format quota_used_pct as percentage with 2 decimals
         )
     else:
