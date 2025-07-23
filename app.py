@@ -153,7 +153,7 @@ else:
 
 
 # Display a warning if no data matches the filters
-if filtered_df.empty and (supabase and (data_quota or data_traceability)):
+if filtered_df.empty and (supabase and (not df_combined.empty)):
     # Only show this warning if data was fetched/attempted but filters resulted in empty
     st.warning("No data matches the selected filters.")
 
