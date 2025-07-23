@@ -10,16 +10,22 @@ import sys
 SUPABASE_URL = None
 SUPABASE_KEY = None
 try:
+    # Access secrets using .get() and handle potential None return
     supabase_secrets = st.secrets.get("supabase", {})
     if supabase_secrets is not None:
         SUPABASE_URL = supabase_secrets.get("url")
         SUPABASE_KEY = supabase_secrets.get("key")
     else:
-        raise KeyError("Supabase secret section not found in Streamlit Secrets.")
+         # If st.secrets.get("supabase", {}) returned None, it means the key 'supabase' was not found
+         raise KeyError("Supabase secrets section not found in Streamlit Secrets.")
 
 
-except KeyError:
-    st.warning("Supabase credentials not found in Streamlit Secrets. Using placeholder values.")
+    # Check if secrets were successfully retrieved. If not, a KeyError will be raised.
+    if not SUPABASE_URL or not SUPABASE_KEY:
+         raise KeyError("Supabase URL or Key not found or incomplete in Streamlit Secrets under [supabase].")
+
+except KeyError as e:
+    st.warning(f"Supabase secrets not found in Streamlit Secrets: {e}. Using placeholder values.")
     SUPABASE_URL = "https://your-project-id.supabase.co"
     SUPABASE_KEY = "YOUR_SUPABASE_KEY"
 except Exception as e:
@@ -42,125 +48,255 @@ except Exception as e:
     st.sidebar.error(f"Failed to connect to Supabase: {e}")
 
 
+# Function to load data in batches
+def load_data_batched(table_name, select_columns, page_size=1000):
+    """Fetches data from a Supabase table in batches."""
+    offset = 0
+    all_rows = []
+    try:
+        while True:
+            # Select specific columns as required
+            result = supabase.table(table_name).select(select_columns).range(offset, offset + page_size - 1).execute()
+            rows = result.data
+            if result.error:
+                 st.error(f"Error fetching data from '{table_name}': {result.error}")
+                 return pd.DataFrame() # Return empty DataFrame on error
+
+            if not rows:
+                break
+            all_rows.extend(rows)
+            offset += page_size
+
+        return pd.DataFrame(all_rows)
+    except Exception as e:
+        st.error(f"An error occurred during batched data loading from '{table_name}': {e}")
+        return pd.DataFrame() # Return empty DataFrame on error
+
+
+quota_view_name = 'quota_view'
 traceability_table_name = 'traceability'
-farmers_table_name = 'farmers'
 
-with st.spinner(f"Fetching data from {traceability_table_name} and {farmers_table_name}..."):
-    # Get all relevant traceability records
-    response_traceability = supabase.from_(traceability_table_name).select(
-        'farmer_id, net_weight_kg, export_lot, exporter, cooperative_name, certification'
-    ).execute()
-    data_traceability = response_traceability.data
+st.title("Farmer Cocoa Quota Dashboard") # Main dashboard title
+st.markdown("Explore and analyze farmer cocoa quota utilization data.") # Add a brief description
 
-    # Get all farmers with quotas
-    response_farmers = supabase.from_(farmers_table_name).select(
-        'farmer_id, max_quota_kg'
-    ).execute()
-    data_farmers = response_farmers.data
+df_combined = pd.DataFrame() # Initialize df_combined as empty DataFrame
+data_quota = None
+data_traceability = None
 
-if data_traceability and data_farmers:
-    df_traceability = pd.DataFrame(data_traceability)
-    df_farmers = pd.DataFrame(data_farmers)
+if supabase: # Only attempt to fetch data if supabase client is initialized
+    try:
+        # Add a spinner to indicate data loading
+        with st.spinner(f"Fetching data from {quota_view_name} and {traceability_table_name}..."):
+            # Fetch data from quota_view using batched loading
+            # Ensure we select only the columns needed from the view
+            df_quota = load_data_batched(quota_view_name, 'farmer_id, max_quota_kg, total_net_weight_kg, quota_used_pct, quota_status')
 
-    # Normalize farmer_id to match (trim + lowercase)
-    df_traceability['farmer_id'] = df_traceability['farmer_id'].str.strip().str.lower()
-    df_farmers['farmer_id'] = df_farmers['farmer_id'].str.strip().str.lower()
 
-    # Remove nulls for aggregation
-    df_traceability = df_traceability[df_traceability['net_weight_kg'].notnull()]
-    df_farmers = df_farmers[df_farmers['max_quota_kg'].notnull()]
+            # Fetch data from traceability using batched loading
+            # Ensure we select only the columns needed for joining and filtering
+            df_traceability = load_data_batched(traceability_table_name, 'farmer_id, export_lot, exporter, cooperative_name, certification')
 
-    # Aggregate traceability: sum net_weight, pick first exporter/cooperative/etc
-    df_trace_summary = df_traceability.groupby('farmer_id').agg({
-        'net_weight_kg': 'sum',
-        'export_lot': 'first',
-        'exporter': 'first',
-        'cooperative_name': 'first',
-        'certification': 'first'
-    }).reset_index().rename(columns={'net_weight_kg': 'total_net_weight_kg'})
 
-    # Merge with farmers
-    df_combined = pd.merge(df_trace_summary, df_farmers, on='farmer_id', how='inner')
+        if not df_quota.empty and not df_traceability.empty:
+            # Process traceability data: group by farmer_id and get unique values for filtering columns
+            # Ensure farmer_id is string for grouping
+            df_traceability['farmer_id'] = df_traceability['farmer_id'].astype(str)
+            df_traceability_processed = df_traceability.groupby('farmer_id').agg({
+                'export_lot': 'first',
+                'exporter': 'first',
+                'cooperative_name': 'first',
+                'certification': 'first'
+            }).reset_index()
 
-    # Calculate quota_used_pct
-    df_combined['quota_used_pct'] = (df_combined['total_net_weight_kg'] / df_combined['max_quota_kg']) * 100
-
-    # Classify quota status
-    def classify_quota(pct):
-        if pct <= 80:
-            return 'OK'
-        elif pct <= 100:
-            return 'WARNING'
+        elif not df_quota.empty and df_traceability.empty:
+             df_traceability_processed = pd.DataFrame(columns=['farmer_id', 'export_lot', 'exporter', 'cooperative_name', 'certification'])
+             st.warning("Traceability DataFrame is empty after fetching, cannot process filtering columns.")
         else:
-            return 'EXCEEDED'
+            df_traceability_processed = pd.DataFrame(columns=['farmer_id', 'export_lot', 'exporter', 'cooperative_name', 'certification'])
+            st.warning("Quota or Traceability DataFrame is empty after fetching.")
 
-    df_combined['quota_status'] = df_combined['quota_used_pct'].apply(classify_quota)
-    # Wypełnij brakujące dane tekstowe, jeśli jakieś są
-for col in ['quota_status', 'export_lot', 'exporter', 'cooperative_name', 'certification']:
-    if col in df_combined.columns:
-        df_combined[col].fillna('Unknown', inplace=True)
 
-# Dodaj opisową wersję statusu
-def map_quota_status_to_descriptive(status):
-    if status == 'OK':
-        return 'Underutilized'
-    elif status == 'WARNING':
-        return 'Meeting Quota'
-    elif status == 'EXCEEDED':
-        return 'Exceeding Quota'
-    else:
-        return 'Unknown'
+        # Join dataframes on 'farmer_id'
+        if not df_quota.empty: # Join even if traceability_processed is empty to keep quota data
+            # Ensure farmer_id columns are of the same type for merging
+            df_quota['farmer_id'] = df_quota['farmer_id'].astype(str)
+            df_traceability_processed['farmer_id'] = df_traceability_processed['farmer_id'].astype(str)
 
-df_combined['descriptive_quota_status'] = df_combined['quota_status'].apply(map_quota_status_to_descriptive)
+            df_combined = pd.merge(df_quota, df_traceability_processed, on='farmer_id', how='left')
 
-# Ustawienia filtrów w sidebarze
-st.sidebar.header("Filter Data")
-exporters = ['All'] + sorted(df_combined['exporter'].unique())
-cooperatives = ['All'] + sorted(df_combined['cooperative_name'].unique())
-certifications = ['All'] + sorted(df_combined['certification'].unique())
-statuses = ['All'] + sorted(df_combined['quota_status'].unique())
+        elif not df_quota.empty and df_traceability_processed.empty:
+            df_combined = df_quota.copy() # If traceability is empty, just use quota data and add empty columns
+            for col in ['export_lot', 'exporter', 'cooperative_name', 'certification']:
+                 df_combined[col] = None # Add columns with None values
+        else:
+            df_combined = pd.DataFrame() # Ensure df_combined is empty if quota data is empty
 
-selected_exporters = st.sidebar.multiselect("Exporter", exporters, default=exporters)
-selected_cooperatives = st.sidebar.multiselect("Cooperative", cooperatives, default=cooperatives)
-selected_certifications = st.sidebar.multiselect("Certification", certifications, default=certifications)
-selected_statuses = st.sidebar.multiselect("Quota Status", statuses, default=statuses)
-farmer_search = st.sidebar.text_input("Search Farmer ID").lower()
 
-min_val = df_combined['quota_used_pct'].min()
-max_val = df_combined['quota_used_pct'].max()
+        # Continue processing only if df_combined is not empty
+        if not df_combined.empty:
+            # Ensure relevant columns are numeric (these should be from quota_view based on its definition)
+            df_combined['max_quota_kg'] = pd.to_numeric(df_combined['max_quota_kg'], errors='coerce')
+            df_combined['total_net_weight_kg'] = pd.to_numeric(df_combined['total_net_weight_kg'], errors='coerce')
+            df_combined['quota_used_pct'] = pd.to_numeric(df_combined['quota_used_pct'], errors='coerce')
 
-# Ustaw wartości domyślne jeśli brak danych
-if pd.isna(min_val):
-    min_val = 0.0
-if pd.isna(max_val):
-    max_val = 100.0
 
-min_pct, max_pct = st.sidebar.slider(
-    "Quota Used (%) Range",
-    float(min_val),
-    float(max_val),
-    (float(min_val), float(max_val)),
-    format="%.2f"
-)
+            # Handle missing values - filling with 0 for numeric and 'Unknown' for text/categorical
+            df_combined['max_quota_kg'].fillna(0, inplace=True)
+            df_combined['total_net_weight_kg'].fillna(0, inplace=True)
+            df_combined['quota_used_pct'].fillna(0, inplace=True)
 
-# Zastosuj filtry
-filtered_df = df_combined[
-    (df_combined['exporter'].isin(selected_exporters if 'All' not in selected_exporters else exporters[1:])) &
-    (df_combined['cooperative_name'].isin(selected_cooperatives if 'All' not in selected_cooperatives else cooperatives[1:])) &
-    (df_combined['certification'].isin(selected_certifications if 'All' not in selected_certifications else certifications[1:])) &
-    (df_combined['quota_status'].isin(selected_statuses if 'All' not in selected_statuses else statuses[1:])) &
-    (df_combined['quota_used_pct'] >= min_pct) &
-    (df_combined['quota_used_pct'] <= max_pct)
-].copy()
+            for col in ['quota_status', 'export_lot', 'exporter', 'cooperative_name', 'certification']:
+                # Check if column exists before trying to fillna (important if join resulted in empty trace data)
+                if col in df_combined.columns:
+                    df_combined[col].fillna('Unknown', inplace=True)
+                else:
+                    # This case should ideally not happen with how the join is structured
+                    st.warning(f"Column '{col}' not found in combined DataFrame during final fillna.")
+                    df_combined[col] = 'Unknown' # Add column with 'Unknown' if it got missed
 
-if farmer_search:
-    filtered_df = filtered_df[filtered_df['farmer_id'].str.contains(farmer_search)]
 
+            # Create a new categorical column descriptive_quota_status based on the view's quota_status
+            def map_quota_status_to_descriptive(status):
+                """Maps the view's quota status to a descriptive string."""
+                if status == 'OK':
+                    return 'Underutilized'
+                elif status == 'WARNING':
+                    return 'Meeting Quota'
+                elif status == 'EXCEEDED':
+                    return 'Exceeding Quota'
+                else:
+                    return 'Unknown' # Handle potential other statuses or None
+
+            df_combined['descriptive_quota_status'] = df_combined['quota_status'].apply(map_quota_status_to_descriptive)
+
+            # --- Add this section to display df_combined before filtering ---
+            st.subheader("Combined Data Before Filtering")
+            st.dataframe(df_combined)
+            # -------------------------------------------------------------
+
+
+            # Section for Filters
+            st.sidebar.header("Filter Data") # Add section title
+            st.sidebar.markdown("Adjust the filters below to refine the data displayed in the dashboard.") # Add descriptive text
+
+            with st.sidebar.container():
+                 # Ensure filter options are generated only if df_combined is not empty
+                if not df_combined.empty:
+                    # Filter for exporter
+                    exporter_options = ['All'] + sorted(df_combined['exporter'].unique().tolist())
+                    selected_exporters = st.sidebar.multiselect(
+                        "Filter by Exporter",
+                        exporter_options,
+                        default=exporter_options
+                    )
+                    if 'All' in selected_exporters and len(selected_exporters) > 1:
+                         selected_exporters = [opt for opt in selected_exporters if opt != 'All']
+                    elif 'All' in selected_exporters and len(selected_exporters) == 1 and 'All' in exporter_options:
+                         selected_exporters = sorted([opt for opt in exporter_options if opt != 'All'])
+                    elif 'All' in selected_exporters and len(selected_exporters) == 1 and 'All' not in exporter_options:
+                         selected_exporters = exporter_options
+
+
+                    # Filter for quota_status (using the status from the view)
+                    quota_status_options = ['All'] + sorted(df_combined['quota_status'].unique().tolist())
+                    selected_quota_statuses = st.sidebar.multiselect(
+                        "Filter by Quota Status",
+                        quota_status_options,
+                        default=quota_status_options
+                    )
+                    if 'All' in selected_quota_statuses and len(selected_quota_statuses) > 1:
+                         selected_quota_statuses = [opt for opt in selected_quota_statuses if opt != 'All']
+                    elif 'All' in selected_quota_statuses and len(selected_quota_statuses) == 1 and 'All' in quota_status_options:
+                         selected_quota_statuses = sorted([opt for opt in quota_status_options if opt != 'All'])
+                    elif 'All' in selected_quota_statuses and len(selected_quota_statuses) == 1 and 'All' not in quota_status_options:
+                         selected_quota_statuses = quota_status_options
+
+
+                    # Filter for cooperative_name
+                    cooperative_options = ['All'] + sorted(df_combined['cooperative_name'].unique().tolist())
+                    selected_cooperatives = st.sidebar.multiselect(
+                        "Filter by Cooperative Name",
+                        cooperative_options,
+                        default=cooperative_options
+                    )
+                    if 'All' in selected_cooperatives and len(selected_cooperatives) > 1:
+                         selected_cooperatives = [opt for opt in selected_cooperatives if opt != 'All']
+                    elif 'All' in selected_cooperatives and len(selected_cooperatives) == 1 and 'All' in cooperative_options:
+                         selected_cooperatives = sorted([opt for opt in cooperative_options if opt != 'All'])
+                    elif 'All' in selected_cooperatives and len(selected_cooperatives) == 1 and 'All' not in cooperative_options:
+                        selected_cooperatives = cooperative_options
+
+
+                    # Filter for certification
+                    certification_options = ['All'] + sorted(df_combined['certification'].unique().tolist())
+                    selected_certifications = st.sidebar.multiselect(
+                        "Filter by Certification",
+                        certification_options,
+                        default=certification_options
+                    )
+                    if 'All' in selected_certifications and len(selected_certifications) > 1:
+                         selected_certifications = [opt for opt in selected_certifications if opt != 'All']
+                    elif 'All' in selected_certifications and len(selected_certifications) == 1 and 'All' in certification_options:
+                         selected_certifications = sorted([opt for opt in certification_options if opt != 'All'])
+                    elif 'All' in selected_certifications and len(selected_certifications) == 1 and 'All' not in certification_options:
+                        selected_certifications = certification_options
+
+
+                    # Filter for farmer_id (text input)
+                    farmer_id_search = st.sidebar.text_input("Search by Farmer ID (substring search)").lower()
+
+
+                    # Filter for quota_used_pct range
+                    min_quota_pct, max_quota_pct = st.sidebar.slider(
+                        "Filter by Quota Used (%)",
+                        float(df_combined['quota_used_pct'].min()) if 'quota_used_pct' in df_combined.columns and not df_combined.empty else 0.0,
+                        float(df_combined['quota_used_pct'].max()) if 'quota_used_pct' in df_combined.columns and not df_combined.empty else 100.0,
+                        (float(df_combined['quota_used_pct'].min()) if 'quota_used_pct' in df_combined.columns and not df_combined.empty else 0.0, float(df_combined['quota_used_pct'].max()) if 'quota_used_pct' in df_combined.columns and not df_combined.empty else 100.0),
+                        format="%.2f"
+                    )
+                else:
+                    st.sidebar.info("Load data to enable filters.")
+                    selected_exporters = []
+                    selected_quota_statuses = []
+                    selected_cooperatives = []
+                    selected_certifications = []
+                    farmer_id_search = ""
+                    min_quota_pct = 0.0
+                    max_quota_pct = 100.0
+
+
+                # Apply filters
+                # Apply filters only if df_combined is not empty
+                if not df_combined.empty:
+                    filtered_df = df_combined[
+                        (df_combined['exporter'].isin(selected_exporters)) &
+                        (df_combined['quota_status'].isin(selected_quota_statuses)) &
+                        (df_combined['cooperative_name'].isin(selected_cooperatives)) &
+                        (df_combined['certification'].isin(selected_certifications)) &
+                        (df_combined['quota_used_pct'] >= min_quota_pct) &
+                        (df_combined['quota_used_pct'] <= max_quota_pct)
+                    ].copy() # Use .copy() to avoid SettingWithCopyWarning
+
+                    # Apply farmer_id text filter
+                    if farmer_id_search:
+                         filtered_df = filtered_df[filtered_df['farmer_id'].astype(str).str.lower().str.contains(farmer_id_search)].copy()
+                else:
+                    filtered_df = pd.DataFrame() # filtered_df is empty if df_combined was empty
+
+
+            else:
+                st.warning(f"No data found in the '{quota_view_name}' or '{traceability_table_name}' or the join resulted in an empty dataset. Please check the database connection, table names, and data.")
+                filtered_df = pd.DataFrame() # Ensure filtered_df is empty if no data was fetched/joined
+
+
+    except Exception as e:
+        st.error(f"An error occurred during data fetching or processing: {e}")
+        st.error("Please ensure your Supabase credentials are correct and the database is accessible.")
+        filtered_df = pd.DataFrame() # Ensure filtered_df is empty if an error occurred
 
 else:
-    st.warning("No data fetched from Supabase or one of the datasets is empty.")
-    df_combined = pd.DataFrame()
-
+    st.error("Supabase client not initialized. Cannot fetch data.")
+    filtered_df = pd.DataFrame() # Ensure filtered_df is empty if supabase client is not initialized
 
 
 # Display a warning if no data matches the filters
