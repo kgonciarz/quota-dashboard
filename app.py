@@ -320,6 +320,7 @@ with st.container():
         sort_order = st.selectbox(
             "Sort the table by Quota Used (%)", # Add label for sorting control
             ["Ascending", "Descending"]
+            index=1
         )
 
         if sort_order == "Ascending":
