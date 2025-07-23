@@ -328,11 +328,22 @@ with st.container():
         else:
             sorted_df = filtered_df.sort_values(by='quota_used_pct', ascending=False)
 
-        # Display the raw data table (only relevant columns) - Use st.dataframe with formatting
-        st.dataframe(
-            sorted_df[['farmer_id', 'max_quota_kg', 'total_net_weight_kg', 'quota_used_pct', 'quota_status', 'cooperative_name', 'certification', 'exporter', 'export_lot']].style
-            .format({'quota_used_pct': '{:.2f}%', 'max_quota_kg': '{:,.0f}', 'total_net_weight_kg': '{:,.0f}'}) # Apply formatting, format quota_used_pct as percentage with 2 decimals
-        )
+        def color_quota_status(val):
+            color = ""
+            if val == "EXCEEDED":
+                color = "red"
+            elif val == "WARNING":
+                color = "orange"
+            elif val == "OK":
+                color = "green"
+            return f"color: {color}"
+
+        styled_df = sorted_df[['farmer_id', 'max_quota_kg', 'total_net_weight_kg', 'quota_used_pct', 'quota_status', 'cooperative_name', 'certification', 'exporter', 'export_lot']].style \
+            .format({'quota_used_pct': '{:.2f}%', 'max_quota_kg': '{:,.0f}', 'total_net_weight_kg': '{:,.0f}'}) \
+            .applymap(color_quota_status, subset=['quota_status'])
+
+        st.dataframe(styled_df)
+
     else:
          st.info("No data to display in the table based on current filters.")
 
