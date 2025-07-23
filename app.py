@@ -10,13 +10,13 @@ import sys
 SUPABASE_URL = None
 SUPABASE_KEY = None
 try:
-    # Access secrets using .get() to avoid raising KeyError directly
-    SUPABASE_URL = st.secrets.get("supabase", {}).get("url")
-    SUPABASE_KEY = st.secrets.get("supabase", {}).get("key")
+    supabase_secrets = st.secrets.get("supabase", {})
+    if supabase_secrets is not None:
+        SUPABASE_URL = supabase_secrets.get("url")
+        SUPABASE_KEY = supabase_secrets.get("key")
+    else:
+        raise KeyError("Supabase secret section not found in Streamlit Secrets.")
 
-    # Check if secrets were successfully retrieved. If not, a KeyError will be raised.
-    if not SUPABASE_URL or not SUPABASE_KEY:
-         raise KeyError("Supabase secrets not found or incomplete in Streamlit Secrets.")
 
 except KeyError:
     st.warning("Supabase credentials not found in Streamlit Secrets. Using placeholder values.")
