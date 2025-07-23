@@ -118,7 +118,8 @@ if supabase: # Only attempt to fetch data if supabase client is initialized
             df_quota['farmer_id'] = df_quota['farmer_id'].astype(str)
             df_traceability_processed['farmer_id'] = df_traceability_processed['farmer_id'].astype(str)
 
-            df_combined = pd.merge(df_quota, df_traceability_processed, on='farmer_id', how='left')
+            df_combined = pd.merge(df_traceability_processed, df_quota, on='farmer_id', how='left')
+
 
         elif not df_quota.empty and df_traceability.empty:
             df_combined = df_quota.copy() # If traceability is empty, just use quota data and add empty columns
