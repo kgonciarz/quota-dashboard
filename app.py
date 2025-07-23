@@ -55,22 +55,26 @@ def load_data_batched(table_name, select_columns, page_size=1000):
     all_rows = []
     try:
         while True:
-            # Select specific columns as required
             result = supabase.table(table_name).select(select_columns).range(offset, offset + page_size - 1).execute()
             rows = result.data
-            if result.error:
-                 st.error(f"Error fetching data from '{table_name}': {result.error}")
-                 return pd.DataFrame() # Return empty DataFrame on error
+
+            if rows is None:
+                st.error(f"Failed to fetch data from '{table_name}' — no data returned.")
+                return pd.DataFrame()  # Return empty DataFrame on error
 
             if not rows:
                 break
+
             all_rows.extend(rows)
             offset += page_size
 
         return pd.DataFrame(all_rows)
     except Exception as e:
         st.error(f"An error occurred during batched data loading from '{table_name}': {e}")
-        return pd.DataFrame() # Return empty DataFrame on error
+        return pd.DataFrame()
+df_combined = pd.DataFrame()
+filtered_df = pd.DataFrame()  # ← TO DODAJ OD RAZU PO df_combined
+
 
 
 quota_view_name = 'quota_view'
